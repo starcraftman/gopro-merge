@@ -2,7 +2,7 @@
 
 A friend recently bought a GoPro to record bike rides.
 He uses linux and didn't like their app to stitch the videos together and put them on his computer.
-This program scans for mp4s in a folder and merges them in the correct order.
+This program scans for mp4s in a folder and merges them in the correct order (by last modification).
 
 ## How To Use
 
