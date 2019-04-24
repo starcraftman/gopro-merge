@@ -28,37 +28,35 @@ PROGRESS_MSG = """Merge MP4 Status
 Output File: {}
 Size (MB): {:10,}/{:,}
 Completion: {:3.2f}%
-Instant Estimate to Completion: {}
+Time to Completion: {}
 """
 
 
 class RateEstimator(object):
     """
-    Instantaneous rate estimate based on progress since last data.
-    Not very accurate.
+    Rate estimate based on progress over a window.
     """
-    def __init__(self, expected_size):
-        self.last_size = 0
-        self.last_timestamp = datetime.datetime.now()
-        self.current_size = 0
-        self.current_timestamp = self.last_timestamp
+    def __init__(self, expected_size, window=3):
+        self.data = []
         self.expected_size = expected_size
+        self.window = window
 
     def add_data(self, new_size):
-        self.last_size = self.current_size
-        self.last_timestamp = self.current_timestamp
-
-        self.current_size = new_size
-        self.current_timestamp = datetime.datetime.now()
+        self.data += [(new_size, datetime.datetime.now())]
+        self.data = list(reversed(list(reversed(self.data))[:self.window]))
 
     def new_estimate(self):
-        size_change = self.current_size - self.last_size
-        if size_change == 0:
+        old = self.data[0]
+        latest = self.data[-1]
+        size_change = latest[0] - old[0]
+        if size_change <= 0:
             return 'N/A'
 
-        delta_time = (self.current_timestamp - self.last_timestamp).total_seconds()
-        size_left = self.expected_size - self.current_size
+        delta_time = (latest[1] - old[1]).total_seconds()
+        size_left = self.expected_size - latest[0]
         secs_left = (size_left / size_change) * delta_time
+        if secs_left < 0:
+            secs_left = 0
 
         return datetime.timedelta(seconds=secs_left)
 
@@ -131,17 +129,10 @@ def get_last_dir(cache):
 
 
 def cmp_vids(vid1, vid2):
-    stat1 = os.stat(vid1).st_mtime
-    stat2 = os.stat(vid2).st_mtime
+    stat1 = os.stat(vid1).st_mtime * 1000000
+    stat2 = os.stat(vid2).st_mtime * 1000000
 
-    if stat1 == stat2:
-        ret = 0
-    elif stat1 < stat2:
-        ret = -1
-    else:
-        ret = 1
-
-    return ret
+    return int(stat1 - stat2)
 
 
 def find_vids(full_path):
