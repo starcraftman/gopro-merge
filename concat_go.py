@@ -21,14 +21,13 @@ import time
 
 OUT_TEMPLATE = 'merged_{}.mp4'
 FFMPEG_CMD = 'ffmpeg -f concat -safe 0 -i {} -c copy {}'
-CACHE_FILE = os.path.expanduser('~/.config/concat_gorc')
 PROGRESS_MSG = """Merge MP4 Status
 ----------------
 
 Output File: {}
 Size (MB): {:10,}/{:,}
 Completion: {:3.2f}%
-Time to Completion: {}
+Estimated Time Remaining: {}
 """
 
 
@@ -54,9 +53,7 @@ class RateEstimator(object):
 
         delta_time = (latest[1] - old[1]).total_seconds()
         size_left = self.expected_size - latest[0]
-        secs_left = (size_left / size_change) * delta_time
-        if secs_left < 0:
-            secs_left = 0
+        secs_left = max(0, (size_left / size_change)) * delta_time
 
         return datetime.timedelta(seconds=secs_left)
 
@@ -82,7 +79,7 @@ class CursesUI(object):
             stdscr.addstr(self.check_file())
             stdscr.refresh()
 
-            time.sleep(0.5)
+            time.sleep(0.15)
             self.proc.poll()
 
     def check_file(self):
@@ -109,23 +106,6 @@ def draw_progress(percent, symbol='=', ticks=50):
     not_done = ticks - done
 
     return '[{}{}]'.format(symbol * done, ' ' * not_done)
-
-
-def save_last_dir(cache, last_dir):
-    try:
-        os.makedirs(os.path.dirname(cache))
-    except OSError:
-        pass
-    with open(cache, 'w') as fout:
-        fout.write(last_dir)
-
-
-def get_last_dir(cache):
-    try:
-        with open(cache) as fin:
-            return fin.readline()
-    except IOError:
-        return None
 
 
 def cmp_vids(vid1, vid2):
@@ -168,16 +148,12 @@ def merge_vids(vids, out_file):
 
 
 def main():
-    if len(sys.argv) != 2 and not get_last_dir(CACHE_FILE):
-        print('Only argument is path to video files to concatenate')
-        print('The last used dir is cached after first run. No args will use cache.')
+    if len(sys.argv) != 2:
+        print('Usage:\n    concat_go.py ./path/to/videos')
+        print('\n    The merged video will in: {}'.format(os.path.abspath('.')))
         sys.exit(1)
 
-    if len(sys.argv) == 2:
-        full_path = os.path.abspath(sys.argv[1])
-    else:
-        full_path = get_last_dir(CACHE_FILE)
-
+    full_path = os.path.abspath(sys.argv[1])
     if not os.path.exists(full_path) or not os.path.isdir(full_path):
         print("Path provided is not a directory or does not exist.")
         sys.exit(1)
@@ -195,7 +171,6 @@ def main():
     try:
         proc, tfile = merge_vids(vids, out_file)
         wrapper(CursesUI(expected_bytes, out_file, proc))
-        save_last_dir(CACHE_FILE, full_path)
     except KeyboardInterrupt:
         proc.kill()
         proc.returncode = -1
