@@ -19,6 +19,13 @@ import sys
 import tempfile
 import time
 
+USAGE = """
+Usage: {} INPUT_DIR [OUTPUT_DIR]
+
+    INPUT_DIR: A path to a folder with mp4 videos to combine, will scan inside.
+    OUTPUT_DIR: The optional folder where the merged video will be written to.
+                If omitted, the merged file will be in the current directory.
+"""
 OUT_TEMPLATE = 'merged_{}.mp4'
 FFMPEG_CMD = 'ffmpeg -f concat -safe 0 -i {} -c copy {}'
 PROGRESS_MSG = """Merge MP4 Status
@@ -148,9 +155,8 @@ def merge_vids(vids, out_file):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print('Usage:\n    concat_go.py ./path/to/videos')
-        print('\n    The merged video will in: {}'.format(os.path.abspath('.')))
+    if len(sys.argv) < 2:
+        print(USAGE.format(sys.argv[0]))
         sys.exit(1)
 
     full_path = os.path.abspath(sys.argv[1])
@@ -160,6 +166,10 @@ def main():
 
     short_date = datetime.datetime.now().strftime('%d_%m_%Y_%H%M%S')
     out_file = OUT_TEMPLATE.format(short_date)
+    try:
+        os.path.join(os.path.abspath(sys.argv[2]), out_file)
+    except IndexError:
+        pass
     print('Combined mp4 will be written to: ' + out_file)
 
     vids = find_vids(full_path)
@@ -169,6 +179,7 @@ def main():
     expected_bytes = total_files_size(vids)
 
     try:
+        proc = None
         proc, tfile = merge_vids(vids, out_file)
         wrapper(CursesUI(expected_bytes, out_file, proc))
     except KeyboardInterrupt:
@@ -176,7 +187,7 @@ def main():
         proc.returncode = -1
         print("Merge aborted, deleting partial merge file.")
     finally:
-        if proc.returncode != 0:
+        if proc and proc.returncode != 0:
             try:
                 os.remove(out_file)
             except OSError:
