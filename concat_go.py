@@ -146,8 +146,8 @@ def merge_vids(vids, out_file):
         fout.flush()
 
         args = FFMPEG_CMD.format(fout.name, out_file).split(' ')
-        dnull = open('/tmp/merge.log', 'w')
-        proc = subprocess.Popen(args, stdout=dnull,
+        stdout = open('/tmp/merge.log', 'w')
+        proc = subprocess.Popen(args, stdout=stdout,
                                 stderr=subprocess.STDOUT)
         proc.poll()
 
@@ -159,22 +159,28 @@ def main():
         print(USAGE.format(sys.argv[0]))
         sys.exit(1)
 
-    full_path = os.path.abspath(sys.argv[1])
-    if not os.path.exists(full_path) or not os.path.isdir(full_path):
+    in_dir = os.path.abspath(sys.argv[1])
+    if not os.path.isdir(in_dir):
         print("Path provided is not a directory or does not exist.")
+        print("    Input Path: " + in_dir)
         sys.exit(1)
 
     short_date = datetime.datetime.now().strftime('%d_%m_%Y_%H%M%S')
     out_file = OUT_TEMPLATE.format(short_date)
     try:
-        os.path.join(os.path.abspath(sys.argv[2]), out_file)
+        out_dir = os.path.abspath(sys.argv[2])
+        if not os.path.isdir(os.path.join(os.path.abspath(sys.argv[2]))):
+            print("Path provided is not a directory or does not exist.")
+            print("    Output Path: " + out_dir)
+            sys.exit(1)
+        out_file = os.path.join(out_dir, out_file)
     except IndexError:
-        pass
+        print("Selecting current directory for merged file.")
     print('Combined mp4 will be written to: ' + out_file)
 
-    vids = find_vids(full_path)
+    vids = find_vids(in_dir)
     if not vids:
-        print('Found no videos in: ' + full_path)
+        print('Found no videos in: ' + in_dir)
         sys.exit(1)
     expected_bytes = total_files_size(vids)
 
