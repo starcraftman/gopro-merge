@@ -101,8 +101,8 @@ class CursesUI(object):
         self.estimator.add_data(cur_bytes)
         estimate = self.estimator.new_estimate()
 
-        msg = PROGRESS_MSG.format(self.output_file, cur_mb,
-                                  self.expected_mb, percent, estimate)
+        msg = PROGRESS_MSG.format(self.output_file, int(cur_mb),
+                                  int(self.expected_mb), percent, estimate)
         msg += draw_progress(percent)
 
         return msg
@@ -113,22 +113,6 @@ def draw_progress(percent, symbol='=', ticks=50):
     not_done = ticks - done
 
     return '[{}{}]'.format(symbol * done, ' ' * not_done)
-
-
-def cmp_vids(vid1, vid2):
-    stat1 = os.stat(vid1).st_mtime * 1000000
-    stat2 = os.stat(vid2).st_mtime * 1000000
-
-    return int(stat1 - stat2)
-
-
-def find_vids(full_path):
-    """ Matches any mp4 vids in the directory. Sorted by last modification. """
-    vids = []
-    for ext in ['mp', 'Mp', 'mP', 'MP']:
-        vids += glob.glob(os.path.join(full_path, '*.{}4'.format(ext)))
-
-    return sorted(vids, cmp_vids)
 
 
 def total_files_size(files):
@@ -178,7 +162,8 @@ def main():
         print("Selecting current directory for merged file.")
     print('Combined mp4 will be written to: ' + out_file)
 
-    vids = find_vids(in_dir)
+    vids = sorted(glob.iglob(os.path.join(in_dir, '*.mp4')),
+                  key=lambda x: os.stat(x).st_mtime)
     if not vids:
         print('Found no videos in: ' + in_dir)
         sys.exit(1)
