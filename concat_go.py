@@ -32,6 +32,7 @@ PROGRESS_MSG = """Merge MP4 Status
 ----------------
 
 Output File: {}
+Log File: /tmp/merge.log
 Size (MB): {:10,}/{:,}
 Completion: {:3.2f}%
 Estimated Time Remaining: {}
@@ -81,6 +82,7 @@ class CursesUI(object):
         stdscr.clear()
         stdscr.addstr(self.check_file())
 
+        self.proc.poll()
         while self.proc.returncode is None:
             stdscr.clear()
             stdscr.addstr(self.check_file())
@@ -97,12 +99,11 @@ class CursesUI(object):
 
         cur_mb = cur_bytes / (1024 ** 2)
         percent = 100 * float(cur_bytes) / float(self.expected_bytes)
-        estimate = 'N/A'
         self.estimator.add_data(cur_bytes)
-        estimate = self.estimator.new_estimate()
 
         msg = PROGRESS_MSG.format(self.output_file, int(cur_mb),
-                                  int(self.expected_mb), percent, estimate)
+                                  int(self.expected_mb), percent,
+                                  self.estimator.new_estimate())
         msg += draw_progress(percent)
 
         return msg
@@ -175,10 +176,11 @@ def main():
         wrapper(CursesUI(expected_bytes, out_file, proc))
     except KeyboardInterrupt:
         proc.kill()
-        proc.returncode = -1
+        proc.returncode = 'kb'
         print("Merge aborted, deleting partial merge file.")
     finally:
-        if proc and proc.returncode != 0:
+        if proc and proc.returncode not in [0, 'kb']:
+            print("For details on error please see: /tmp/merge.log")
             try:
                 os.remove(out_file)
             except OSError:
