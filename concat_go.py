@@ -4,18 +4,17 @@
 GoPro stores video files split into smaller files.
 Sort the videos into order and merge them into a single mp4.
 This assumes all vieos in the directory are part of the same video.
-
-Stores last used dir in: $HOME/.config/concat_gorc
 """
 from __future__ import print_function
 
 from curses import wrapper
+import argparse
 import datetime
 import glob
 import math
 import os
+import re
 import subprocess
-import sys
 import tempfile
 import time
 
@@ -37,6 +36,7 @@ Size (MB): {:10,}/{:,}
 Completion: {:3.2f}%
 Estimated Time Remaining: {}
 """
+RENAME_TEST = re.compile(r'(\d{3}__)?(.*)')
 
 
 class RateEstimator(object):
@@ -139,56 +139,98 @@ def merge_vids(vids, out_file):
         return proc, fout.name
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(USAGE.format(sys.argv[0]))
-        sys.exit(1)
+def make_parser():
+    """
+    Make the simple argparser.
+    """
+    parser = argparse.ArgumentParser(description='Manage gopro vids.')
+    parser.add_argument('input', help='The input directory with videos.')
+    parser.add_argument('output', nargs='?', help='The output directory .')
+    parser.add_argument('-r', '--rename', action='store_true',
+                        help='Only rename the files.')
 
-    in_dir = os.path.abspath(sys.argv[1])
-    if not os.path.isdir(in_dir):
-        print("Path provided is not a directory or does not exist.")
-        print("    Input Path: " + in_dir)
-        sys.exit(1)
+    return parser
 
-    short_date = datetime.datetime.now().strftime('%d_%m_%Y_%H%M%S')
-    out_file = OUT_TEMPLATE.format(short_date)
-    try:
-        out_dir = os.path.abspath(sys.argv[2])
-        if not os.path.isdir(os.path.join(os.path.abspath(sys.argv[2]))):
-            print("Path provided is not a directory or does not exist.")
-            print("    Output Path: " + out_dir)
-            sys.exit(1)
-        out_file = os.path.join(out_dir, out_file)
-    except IndexError:
-        print("Selecting current directory for merged file.")
-    print('Combined mp4 will be written to: ' + out_file)
 
-    vids = sorted(glob.iglob(os.path.join(in_dir, '*.mp4')),
+def validate_paths(path_in, path_out):
+    """
+    Validate the input directory has videos
+    and that the output directory is writable.
+
+    Returns:
+        (vids, merge_file)
+            vids: The list of videos from input.
+            merge_file: The output file to merge to.
+
+    Raises:
+        OSError - Any of a handful of conditions fail, see message.
+    """
+    path_in = os.path.abspath(path_in)
+    if not os.path.isdir(path_in):
+        raise OSError("Path provided is not a directory or does not exist."
+                      "    Input Path: " + path_in)
+
+    vids = sorted(glob.iglob(os.path.join(path_in, '*.mp4')),
                   key=lambda x: os.stat(x).st_mtime)
     if not vids:
-        print('Found no videos in: ' + in_dir)
-        sys.exit(1)
-    expected_bytes = total_files_size(vids)
+        raise OSError("No videos found in: " + path_in)
 
+    path_out = os.path.abspath(path_out)
+    if not os.path.isdir(path_out):
+        raise OSError("Path provided is not a directory or does not exist."
+                      "    Output Path: " + path_out)
+
+    short_date = datetime.datetime.now().strftime('%d_%m_%Y_%H%M%S')
+    out_file = os.path.join(path_out, OUT_TEMPLATE.format(short_date))
     try:
-        proc = None
-        proc, tfile = merge_vids(vids, out_file)
-        wrapper(CursesUI(expected_bytes, out_file, proc))
-    except KeyboardInterrupt:
-        proc.kill()
-        proc.returncode = 'kb'
-        print("Merge aborted, deleting partial merge file.")
+        with open(out_file, 'w') as fout:
+            fout.write("Test")
     finally:
-        if proc and proc.returncode not in [0, 'kb']:
-            print("For details on error please see: /tmp/merge.log")
-            try:
-                os.remove(out_file)
-            except OSError:
-                pass
         try:
-            os.remove(tfile)
+            os.remove(out_file)
         except OSError:
             pass
+
+    return vids, out_file
+
+
+def main():
+    parser = make_parser()
+    args = parser.parse_args()
+    if args.output is None:
+        print("Selecting input directory for merged file.")
+        args.output = args.input
+
+    vids, out_file = validate_paths(args.input, args.output)
+    expected_bytes = total_files_size(vids)
+
+    if args.rename:
+        for cnt, vid in enumerate(vids):
+            match = RENAME_TEST.match(os.path.basename(vid))
+            vid_rename = os.path.join(os.path.dirname(vid),
+                                      "{:03}__{}".format(cnt, match.group(2)))
+            os.rename(vid, vid_rename)
+
+    else:
+        try:
+            proc = None
+            proc, tfile = merge_vids(vids, out_file)
+            wrapper(CursesUI(expected_bytes, out_file, proc))
+        except KeyboardInterrupt:
+            proc.kill()
+            proc.returncode = 'kb'
+            print("Merge aborted, deleting partial merge file.")
+        finally:
+            if proc and proc.returncode not in [0, 'kb']:
+                print("For details on error please see: /tmp/merge.log")
+                try:
+                    os.remove(out_file)
+                except OSError:
+                    pass
+            try:
+                os.remove(tfile)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
