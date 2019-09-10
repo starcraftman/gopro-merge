@@ -170,7 +170,7 @@ def validate_paths(path_in, path_out):
         raise OSError("Path provided is not a directory or does not exist."
                       "    Input Path: " + path_in)
 
-    vids = sorted(glob.iglob(os.path.join(path_in, '*.mp4')),
+    vids = sorted(glob.iglob(os.path.join(path_in, '*.[mM][pP]4')),
                   key=lambda x: os.stat(x).st_mtime)
     if not vids:
         raise OSError("No videos found in: " + path_in)
