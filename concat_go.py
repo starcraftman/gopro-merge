@@ -15,6 +15,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -35,8 +36,16 @@ Log File: /tmp/merge.log
 Size (MB): {:10,}/{:,}
 Completion: {:3.2f}%
 Estimated Time Remaining: {}
+
+Cancel at any time with Ctrl + C
 """
 RENAME_TEST = re.compile(r'(\d{3}__)?(.*)')
+INFO = """Target output file for merge: {}
+Will merge these videos together: {}\n\n\nContinue? Y/n """
+try:
+    input = raw_input
+except NameError:
+    pass
 
 
 class RateEstimator(object):
@@ -50,7 +59,8 @@ class RateEstimator(object):
 
     def add_data(self, new_size):
         self.data += [(new_size, datetime.datetime.now())]
-        self.data = list(reversed(list(reversed(self.data))[:self.window]))
+        while len(self.data) > self.window:
+            self.data = self.data[1:]
 
     def new_estimate(self):
         old = self.data[0]
@@ -124,6 +134,7 @@ def total_files_size(files):
     return total
 
 
+# FIXME: Not sure why spaces in tempfile crash ffmpeg.
 def merge_vids(vids, out_file):
     with tempfile.NamedTemporaryFile(mode='w', delete=False) as fout:
         for vid in vids:
@@ -170,7 +181,10 @@ def validate_paths(path_in, path_out):
         raise OSError("Path provided is not a directory or does not exist."
                       "    Input Path: " + path_in)
 
-    vids = sorted(glob.iglob(os.path.join(path_in, '*.[mM][pP]4')),
+    if ' ' in path_in:
+        print("Spaces detected within input path. Consider removing if problems arise.")
+
+    vids = sorted(glob.iglob(os.path.join(path_in, '**', '*.[mM][pP]4')),
                   key=lambda x: os.stat(x).st_mtime)
     if not vids:
         raise OSError("No videos found in: " + path_in)
@@ -203,6 +217,11 @@ def main():
 
     vids, out_file = validate_paths(args.input, args.output)
     expected_bytes = total_files_size(vids)
+
+    resp = input(INFO.format(out_file, "\n    " + "\n    ".join(vids)))
+    if not resp or resp.lower()[0] != 'y':
+        print("Aborting merge now.")
+        sys.exit(1)
 
     if args.rename:
         for cnt, vid in enumerate(vids):
