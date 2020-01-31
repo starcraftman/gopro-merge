@@ -184,7 +184,8 @@ def validate_paths(path_in, path_out):
     if ' ' in path_in:
         print("Spaces detected within input path. Consider removing if problems arise.")
 
-    vids = sorted(glob.iglob(os.path.join(path_in, '**', '*.[mM][pP]4')),
+    vids = sorted(glob.iglob(os.path.join(path_in, '**', '*.[mM][pP]4'),
+                             recursive=True),
                   key=lambda x: os.stat(x).st_mtime)
     if not vids:
         raise OSError("No videos found in: " + path_in)
