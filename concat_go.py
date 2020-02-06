@@ -10,7 +10,6 @@ from __future__ import print_function
 from curses import wrapper
 import argparse
 import datetime
-import glob
 import math
 import os
 import re
@@ -155,15 +154,15 @@ def make_parser():
     Make the simple argparser.
     """
     parser = argparse.ArgumentParser(description='Manage gopro vids.')
-    parser.add_argument('input', help='The input directory with videos.')
-    parser.add_argument('output', nargs='?', help='The output directory .')
+    parser.add_argument('inputs', nargs='+', help='The input files to concatenate.')
+    parser.add_argument('-o', '--output', nargs='?', help='The output directory to store merged file. Defaults to current dir.')
     parser.add_argument('-r', '--rename', action='store_true',
                         help='Only rename the files.')
 
     return parser
 
 
-def validate_paths(path_in, path_out):
+def validate_paths(inputs, path_out):
     """
     Validate the input directory has videos
     and that the output directory is writable.
@@ -176,19 +175,20 @@ def validate_paths(path_in, path_out):
     Raises:
         OSError - Any of a handful of conditions fail, see message.
     """
-    path_in = os.path.abspath(path_in)
-    if not os.path.isdir(path_in):
-        raise OSError("Path provided is not a directory or does not exist."
-                      "    Input Path: " + path_in)
+    if not inputs:
+        raise OSError("No videos provided to concatenate.")
 
-    if ' ' in path_in:
-        print("Spaces detected within input path. Consider removing if problems arise.")
+    try:
+        inputs = [os.path.abspath(x) for x in inputs]
+        for input in inputs:
+            assert os.path.exists(input)
+            assert input[-3:].lower() == 'mp4'
+            if ' ' in input:
+                print("Space detected in [{}], remove space if issues occur.")
+    except AssertionError:
+        raise OSError("One or more of the inputs were bad. Please check.")
 
-    vids = sorted(glob.iglob(os.path.join(path_in, '**', '*.[mM][pP]4'),
-                             recursive=True),
-                  key=lambda x: os.stat(x).st_mtime)
-    if not vids:
-        raise OSError("No videos found in: " + path_in)
+    vids = sorted(inputs, key=lambda x: os.stat(x).st_mtime)
 
     path_out = os.path.abspath(path_out)
     if not os.path.isdir(path_out):
@@ -213,10 +213,10 @@ def main():
     parser = make_parser()
     args = parser.parse_args()
     if args.output is None:
-        print("Selecting input directory for merged file.")
-        args.output = args.input
+        print("Selecting current directory for merged file.")
+        args.output = os.path.abspath(os.path.curdir)
 
-    vids, out_file = validate_paths(args.input, args.output)
+    vids, out_file = validate_paths(args.inputs, args.output)
     expected_bytes = total_files_size(vids)
 
     resp = input(INFO.format(out_file, "\n    " + "\n    ".join(vids)))
