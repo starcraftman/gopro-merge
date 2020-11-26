@@ -18,13 +18,6 @@ import sys
 import tempfile
 import time
 
-USAGE = """
-Usage: {} INPUT_DIR [OUTPUT_DIR]
-
-    INPUT_DIR: A path to a folder with mp4 videos to combine, will scan inside.
-    OUTPUT_DIR: The optional folder where the merged video will be written to.
-                If omitted, the merged file will be in the current directory.
-"""
 OUT_TEMPLATE = 'merged_{}.mp4'
 FFMPEG_CMD = 'ffmpeg -f concat -safe 0 -i {} -c copy {}'
 PROGRESS_MSG = """Merge MP4 Status
@@ -184,7 +177,7 @@ def validate_paths(inputs, path_out):
             assert os.path.exists(input)
             assert input[-3:].lower() == 'mp4'
             if ' ' in input:
-                print("Space detected in [{}], remove space if issues occur.")
+                print("Space detected in [{}], remove all spaces in video path.".format(input))
     except AssertionError:
         raise OSError("One or more of the inputs were bad. Please check.")
 
