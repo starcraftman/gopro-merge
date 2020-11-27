@@ -1,12 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 GoPro stores video files split into smaller files.
 Sort the videos into order and merge them into a single mp4.
 This assumes all vieos in the directory are part of the same video.
+Ensure you use python >= 3.5 and have ffmpeg installed.
 """
-from __future__ import print_function
-
 from curses import wrapper
 import argparse
 import datetime
@@ -17,7 +16,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
+UPDATE_URL = "https://raw.githubusercontent.com/starcraftman/gopro-merge/master/concat_go.py"
 OUT_TEMPLATE = 'merged_{}.mp4'
 FFMPEG_CMD = 'ffmpeg -f concat -safe 0 -i {} -c copy {}'
 PROGRESS_MSG = """Merge MP4 Status
@@ -38,32 +39,46 @@ try:
     input = raw_input
 except NameError:
     pass
+try:
+    assert sys.version_info[0:2] >= (3, 5)
+except AssertionError:
+    print("This entire program must be run with python >= 3.5")
+    print("You ran with python version: {}.{}".format(*sys.version_info[0:2]))
+    sys.exit(1)
 
 
 class RateEstimator(object):
     """
     Rate estimate based on progress over a window.
     """
-    def __init__(self, expected_size, window=3):
+    def __init__(self, expected_size, *, window=7):
         self.data = []
         self.expected_size = expected_size
         self.window = window
 
     def add_data(self, new_size):
-        self.data += [(new_size, datetime.datetime.now())]
-        while len(self.data) > self.window:
-            self.data = self.data[1:]
+        """
+        Add a single new size to the data set.
+        Maintain only the most recent window data points.
+        Regardless of how often called, only add data with a big enough gap.
+        """
+        now = datetime.datetime.now()
+        self.data += [(new_size, now)]
+        self.data = self.data[-self.window:]
 
     def new_estimate(self):
-        old = self.data[0]
-        latest = self.data[-1]
-        size_change = latest[0] - old[0]
-        if size_change <= 0:
+        """
+        Calculate a new estimate based on existing data.
+
+        Returns: A datetime.timedelta of the time remaining until video merge complete.
+        """
+        size_delta = self.data[-1][0] - self.data[0][0]
+        if size_delta == 0:
             return 'N/A'
 
-        delta_time = (latest[1] - old[1]).total_seconds()
-        size_left = self.expected_size - latest[0]
-        secs_left = max(0, (size_left / size_change)) * delta_time
+        time_delta = (self.data[-1][1] - self.data[0][1]).total_seconds()
+        size_left = self.expected_size - self.data[-1][0]
+        secs_left = max(0, (size_left / size_delta)) * time_delta
 
         return datetime.timedelta(seconds=secs_left)
 
@@ -73,14 +88,18 @@ class CursesUI(object):
     Curses manager to update user via cuses ui on merging progress.
     Blocking since I don't need to run more than the one command.
     """
-    def __init__(self, expected_bytes, output_file, proc):
+    def __init__(self, expected_bytes, output_file, proc, *, time_sleep=0.05):
         self.expected_bytes = expected_bytes
         self.expected_mb = expected_bytes / (1024 ** 2)
         self.output_file = output_file
         self.proc = proc
         self.estimator = RateEstimator(expected_bytes)
+        self.time_sleep = time_sleep
 
     def __call__(self, stdscr):
+        """
+        The function that gets called to update curses ui.
+        """
         stdscr.clear()
         stdscr.addstr(self.check_file())
 
@@ -90,10 +109,15 @@ class CursesUI(object):
             stdscr.addstr(self.check_file())
             stdscr.refresh()
 
-            time.sleep(0.15)
+            time.sleep(self.time_sleep)
             self.proc.poll()
 
     def check_file(self):
+        """
+        Check the current file and return the text block describing it with estimate.
+
+        Returns: A string to put in the curses ui.
+        """
         try:
             cur_bytes = os.stat(self.output_file).st_size
         except OSError:
@@ -112,6 +136,9 @@ class CursesUI(object):
 
 
 def draw_progress(percent, symbol='=', ticks=50):
+    """
+    Draw a simple ascii bar in percent.
+    """
     done = int(math.floor((percent / 100) * ticks))
     not_done = ticks - done
 
@@ -119,6 +146,9 @@ def draw_progress(percent, symbol='=', ticks=50):
 
 
 def total_files_size(files):
+    """
+    Simply return the size in bytes of all files in list.
+    """
     total = 0
     for fname in files:
         total += os.stat(fname).st_size
@@ -128,6 +158,13 @@ def total_files_size(files):
 
 # FIXME: Not sure why spaces in tempfile crash ffmpeg.
 def merge_vids(vids, out_file):
+    """
+    Merge all videos into a single mp4 file.
+
+    Args:
+        vids: List of input mp4s to merge.
+        out_file: The file to output the merged video to.
+    """
     with tempfile.NamedTemporaryFile(mode='w', delete=False) as fout:
         for vid in vids:
             fout.write("file '{}'\n".format(vid.replace("'", "\\\\'")))
@@ -147,10 +184,12 @@ def make_parser():
     Make the simple argparser.
     """
     parser = argparse.ArgumentParser(description='Manage gopro vids.')
-    parser.add_argument('inputs', nargs='+', help='The input files to concatenate.')
-    parser.add_argument('-o', '--output', nargs='?', help='The output directory to store merged file. Defaults to current dir.')
+    parser.add_argument('inputs', nargs='*', help='The input videos to concatenate, must be mp4s.')
+    parser.add_argument('-o', '--output', nargs='?', help='The output merged video.')
     parser.add_argument('-r', '--rename', action='store_true',
-                        help='Only rename the files.')
+                        help='Only rename the files in order.')
+    parser.add_argument('-u', '--update', action='store_true',
+                        help='Update this script and exit.')
 
     return parser
 
@@ -203,8 +242,16 @@ def validate_paths(inputs, path_out):
 
 
 def main():
-    parser = make_parser()
-    args = parser.parse_args()
+    args = make_parser().parse_args()
+
+    if args.update:
+        print("Updating the script ..... ", end="")
+        resp = urllib.request.urlopen(UPDATE_URL)
+        with open(os.path.abspath(__file__), 'wb') as fout:
+            fout.write(resp.read())
+        print("Done!")
+        sys.exit(0)
+
     if args.output is None:
         print("Selecting current directory for merged file.")
         args.output = os.path.abspath(os.path.curdir)
@@ -224,26 +271,28 @@ def main():
                                       "{:03}__{}".format(cnt, match.group(2)))
             os.rename(vid, vid_rename)
 
-    else:
+        return
+
+    # Default merge case
+    try:
+        proc = None
+        proc, tfile = merge_vids(vids, out_file)
+        wrapper(CursesUI(expected_bytes, out_file, proc))
+    except KeyboardInterrupt:
+        proc.kill()
+        proc.returncode = 'kb'
+        print("Merge aborted, deleting partial merge file.")
         try:
-            proc = None
-            proc, tfile = merge_vids(vids, out_file)
-            wrapper(CursesUI(expected_bytes, out_file, proc))
-        except KeyboardInterrupt:
-            proc.kill()
-            proc.returncode = 'kb'
-            print("Merge aborted, deleting partial merge file.")
-        finally:
-            if proc and proc.returncode not in [0, 'kb']:
-                print("For details on error please see: /tmp/merge.log")
-                try:
-                    os.remove(out_file)
-                except OSError:
-                    pass
-            try:
-                os.remove(tfile)
-            except OSError:
-                pass
+            os.remove(out_file)
+        except OSError:
+            pass
+    finally:
+        if proc and proc.returncode not in [0, 'kb']:
+            print("For details on error please see: /tmp/merge.log")
+        try:
+            os.remove(tfile)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
